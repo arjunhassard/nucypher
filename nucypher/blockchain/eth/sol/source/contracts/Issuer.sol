@@ -11,7 +11,7 @@ import "zeppelin/token/ERC20/SafeERC20.sol";
 
 /**
 * @notice Contract for calculation of issued tokens
-* @dev |v2.1.1|
+* @dev |v2.2.1|
 */
 abstract contract Issuer is Upgradeable {
     using SafeERC20 for NuCypherToken;
@@ -25,14 +25,21 @@ abstract contract Issuer is Upgradeable {
     NuCypherToken public immutable token;
     uint256 public immutable totalSupply;
 
-    uint256 public immutable miningCoefficient;
-    uint256 public immutable lockedPeriodsCoefficient;
+    // k2 * k3
+    uint256 public immutable mintingCoefficient;
+    // k1
+    uint256 public immutable lockingDurationCoefficient1;
+    // k3
+    uint256 public immutable lockingDurationCoefficient2;
     uint32 public immutable secondsPerPeriod;
-    uint16 public immutable rewardedPeriods;
+    uint16 public immutable maxRewardedPeriods;
+
+    uint256 public immutable maxFirstPhaseReward;
+    uint256 public immutable firstPhaseTotalSupply;
 
     uint16 public currentMintingPeriod;
     /**
-    * Current supply is used in the mining formula and is stored to prevent different calculation
+    * Current supply is used in the minting formula and is stored to prevent different calculation
     * for stakers which get reward in the same period. There are two values -
     * supply for previous period (used in formula) and supply for current period which accumulates value
     * before end of period. There is no order between them because of storage savings.
@@ -42,45 +49,67 @@ abstract contract Issuer is Upgradeable {
     uint256 public currentSupply2;
 
     /**
-    * @notice Constructor sets address of token contract and coefficients for mining
-    * @dev Mining formula for one stake in one period
-    (totalSupply - currentSupply) * (lockedValue / totalLockedValue) * (k1 + allLockedPeriods) / k2
-    if allLockedPeriods > rewardedPeriods then allLockedPeriods = rewardedPeriods
+    * @notice Constructor sets address of token contract and coefficients for minting
+    * @dev Minting formula for one sub-stake in one period for the first phase
+    maxFirstPhaseReward * (lockedValue / totalLockedValue) * (k1 + allLockedPeriods) / k3
+    * @dev Minting formula for one sub-stake in one period for the seconds phase
+    (totalSupply - currentSupply) / k2 * (lockedValue / totalLockedValue) * (k1 + allLockedPeriods) / k3
+    if allLockedPeriods > maxRewardedPeriods then allLockedPeriods = maxRewardedPeriods
     * @param _token Token contract
     * @param _hoursPerPeriod Size of period in hours
-    * @param _miningCoefficient Mining coefficient (k2)
-    * @param _lockedPeriodsCoefficient Locked periods coefficient (k1)
-    * @param _rewardedPeriods Max periods that will be additionally rewarded
+    * @param _secondPhaseMintingCoefficient Minting coefficient for the second phase (k2)
+    * @param _lockingDurationCoefficient1 Numerator of he locking duration coefficient (k1)
+    * @param _lockingDurationCoefficient2 Denominator of the locking duration coefficient (k3)
+    * @param _maxRewardedPeriods Max periods that will be additionally rewarded
+    * @param _firstPhaseTotalSupply Total supply for the first phase
+    * @param _maxFirstPhaseReward Max possible reward for one period for all stakers in the first phase
     */
     constructor(
         NuCypherToken _token,
         uint32 _hoursPerPeriod,
-        uint256 _miningCoefficient,
-        uint256 _lockedPeriodsCoefficient,
-        uint16 _rewardedPeriods
+        uint256 _secondPhaseMintingCoefficient,
+        uint256 _lockingDurationCoefficient1,
+        uint256 _lockingDurationCoefficient2,
+        uint16 _maxRewardedPeriods,
+        uint256 _firstPhaseTotalSupply,
+        uint256 _maxFirstPhaseReward
     )
         public
     {
         uint256 localTotalSupply = _token.totalSupply();
         require(localTotalSupply > 0 &&
-            _miningCoefficient != 0 &&
+            _secondPhaseMintingCoefficient != 0 &&
             _hoursPerPeriod != 0 &&
-            _lockedPeriodsCoefficient != 0 &&
-            _rewardedPeriods != 0);
-        uint256 maxLockedPeriods = _rewardedPeriods + _lockedPeriodsCoefficient;
-        require(maxLockedPeriods > _rewardedPeriods &&
-            // worst case for `totalLockedValue * k2`, when totalLockedValue == totalSupply
-            localTotalSupply * _miningCoefficient / localTotalSupply == _miningCoefficient &&
+            _lockingDurationCoefficient1 != 0 &&
+            _lockingDurationCoefficient2 != 0 &&
+            _maxRewardedPeriods != 0);
+
+        uint256 maxLockingDurationCoefficient = _maxRewardedPeriods + _lockingDurationCoefficient1;
+        uint256 localMintingCoefficient = _secondPhaseMintingCoefficient * _lockingDurationCoefficient2;
+        require(maxLockingDurationCoefficient > _maxRewardedPeriods &&
+            localMintingCoefficient / _secondPhaseMintingCoefficient ==  _lockingDurationCoefficient2 &&
+            // worst case for `totalLockedValue * k2 * k3`, when totalLockedValue == totalSupply
+            localTotalSupply * localMintingCoefficient / localTotalSupply == localMintingCoefficient &&
             // worst case for `(totalSupply - currentSupply) * lockedValue * (k1 + allLockedPeriods)`,
             // when currentSupply == 0, lockedValue == totalSupply
-            localTotalSupply * localTotalSupply * maxLockedPeriods / localTotalSupply / localTotalSupply == maxLockedPeriods,
+            localTotalSupply * localTotalSupply * maxLockingDurationCoefficient / localTotalSupply / localTotalSupply ==
+                maxLockingDurationCoefficient,
             "Specified parameters cause overflow");
+
+        require(maxLockingDurationCoefficient <= _lockingDurationCoefficient2,
+            "Resulting locking duration coefficient must be less than 1");
+        require(_firstPhaseTotalSupply <= localTotalSupply, "Too many tokens for the first phase");
+        require(_maxFirstPhaseReward <= _firstPhaseTotalSupply, "Reward for the first phase is too high");
+
         token = _token;
-        miningCoefficient = _miningCoefficient;
         secondsPerPeriod = _hoursPerPeriod.mul32(1 hours);
-        lockedPeriodsCoefficient = _lockedPeriodsCoefficient;
-        rewardedPeriods = _rewardedPeriods;
+        lockingDurationCoefficient1 = _lockingDurationCoefficient1;
+        lockingDurationCoefficient2 = _lockingDurationCoefficient2;
+        maxRewardedPeriods = _maxRewardedPeriods;
+        firstPhaseTotalSupply = _firstPhaseTotalSupply;
+        maxFirstPhaseReward = _maxFirstPhaseReward;
         totalSupply = localTotalSupply;
+        mintingCoefficient = localMintingCoefficient;
     }
 
     /**
@@ -104,11 +133,13 @@ abstract contract Issuer is Upgradeable {
     */
     function initialize(uint256 _reservedReward) external onlyOwner {
         require(currentMintingPeriod == 0);
-        token.safeTransferFrom(msg.sender, address(this), _reservedReward);
+        // Reserved reward must be sufficient for at least one period of the first phase
+        require(maxFirstPhaseReward <= _reservedReward);
         currentMintingPeriod = getCurrentPeriod();
         uint256 currentTotalSupply = totalSupply - _reservedReward;
         currentSupply1 = currentTotalSupply;
         currentSupply2 = currentTotalSupply;
+        token.safeTransferFrom(msg.sender, address(this), _reservedReward);
         emit Initialized(_reservedReward);
     }
 
@@ -132,17 +163,31 @@ abstract contract Issuer is Upgradeable {
             return 0;
         }
 
-        uint256 maxReward = getReservedReward();
-        uint256 currentReward = _currentPeriod <= currentMintingPeriod ?
-            totalSupply - Math.min(currentSupply1, currentSupply2) : maxReward;
+        uint256 previousPeriodSupply = _currentPeriod <= currentMintingPeriod ?
+            Math.min(currentSupply1, currentSupply2) : Math.max(currentSupply1, currentSupply2);
+        uint256 currentReward;
+        uint256 coefficient;
 
-        //(totalSupply - currentSupply) * lockedValue * (k1 + allLockedPeriods) / (totalLockedValue * k2)
+        // first phase
+        // maxFirstPhaseReward * lockedValue * (k1 + allLockedPeriods) / (totalLockedValue * k3)
+        if (previousPeriodSupply + maxFirstPhaseReward <= firstPhaseTotalSupply) {
+            currentReward = maxFirstPhaseReward;
+            coefficient = lockingDurationCoefficient2;
+        // second phase
+        // (totalSupply - currentSupply) * lockedValue * (k1 + allLockedPeriods) / (totalLockedValue * k2 * k3)
+        } else {
+            currentReward = totalSupply - previousPeriodSupply;
+            coefficient = mintingCoefficient;
+        }
+
         uint256 allLockedPeriods =
-            AdditionalMath.min16(_allLockedPeriods, rewardedPeriods) + lockedPeriodsCoefficient;
+            AdditionalMath.min16(_allLockedPeriods, maxRewardedPeriods) + lockingDurationCoefficient1;
         amount = (currentReward * _lockedValue * allLockedPeriods) /
-            (_totalLockedValue * miningCoefficient);
+            (_totalLockedValue * coefficient);
 
         // rounding the last reward
+        // TODO optimise
+        uint256 maxReward = getReservedReward();
         if (amount == 0) {
             amount = 1;
         } else if (amount > maxReward) {

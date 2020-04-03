@@ -34,7 +34,7 @@ interface WorkLockInterface {
 /**
 * @notice Contract holds and locks stakers tokens.
 * Each staker that locks their tokens will receive some compensation
-* @dev |v3.1.1|
+* @dev |v3.2.1|
 */
 contract StakingEscrow is Issuer {
     using AdditionalMath for uint256;
@@ -132,10 +132,13 @@ contract StakingEscrow is Issuer {
     * @notice Constructor sets address of token contract and coefficients for mining
     * @param _token Token contract
     * @param _hoursPerPeriod Size of period in hours
-    * @param _miningCoefficient Mining coefficient
+    * @param _secondPhaseMintingCoefficient Minting coefficient for the second phase (k2)
+    * @param _lockingDurationCoefficient1 Numerator of he locking duration coefficient (k1)
+    * @param _lockingDurationCoefficient2 Denominator of the locking duration coefficient (k3)
+    * @param _maxRewardedPeriods Max periods that will be additionally rewarded
+    * @param _firstPhaseTotalSupply Total supply for the first phase
+    * @param _maxFirstPhaseReward Max possible reward for one period for all stakers in the first phase
     * @param _minLockedPeriods Min amount of periods during which tokens can be locked
-    * @param _lockedPeriodsCoefficient Locked blocks coefficient
-    * @param _rewardedPeriods Max periods that will be additionally rewarded
     * @param _minAllowableLockedTokens Min amount of tokens that can be locked
     * @param _maxAllowableLockedTokens Max amount of tokens that can be locked
     * @param _minWorkerPeriods Min amount of periods while a worker can't be changed
@@ -144,9 +147,12 @@ contract StakingEscrow is Issuer {
     constructor(
         NuCypherToken _token,
         uint32 _hoursPerPeriod,
-        uint256 _miningCoefficient,
-        uint256 _lockedPeriodsCoefficient,
-        uint16 _rewardedPeriods,
+        uint256 _secondPhaseMintingCoefficient,
+        uint256 _lockingDurationCoefficient1,
+        uint256 _lockingDurationCoefficient2,
+        uint16 _maxRewardedPeriods,
+        uint256 _firstPhaseTotalSupply,
+        uint256 _maxFirstPhaseReward,
         uint16 _minLockedPeriods,
         uint256 _minAllowableLockedTokens,
         uint256 _maxAllowableLockedTokens,
@@ -157,9 +163,12 @@ contract StakingEscrow is Issuer {
         Issuer(
             _token,
             _hoursPerPeriod,
-            _miningCoefficient,
-            _lockedPeriodsCoefficient,
-            _rewardedPeriods
+            _secondPhaseMintingCoefficient,
+            _lockingDurationCoefficient1,
+            _lockingDurationCoefficient2,
+            _maxRewardedPeriods,
+            _firstPhaseTotalSupply,
+            _maxFirstPhaseReward
         )
     {
         // constant `1` in the expression `_minLockedPeriods > 1` uses to simplify the `lock` method
