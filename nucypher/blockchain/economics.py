@@ -363,40 +363,51 @@ class StandardTokenEconomics(BaseEconomics):
                          maximum_rewarded_periods=maximum_rewarded_periods,
                          **kwargs)
 
-    # TODO change this
-    def token_supply_at_period(self, period: int) -> int:
-        if period < 0:
+
+    def phase1_token_supply_at_period(self, period1: int) -> int:
+        if period1 < 0:
             raise ValueError("Period must be a positive integer")
 
         with localcontext() as ctx:
             ctx.prec = self._precision
 
-            #
-            # Eq. 3 of the mining paper
-            # https://github.com/nucypher/mining-paper/blob/master/mining-paper.pdf
-            #
-
-            t = Decimal(period)
+            t = Decimal(period1)
             S_0 = self.erc20_initial_supply
-            S_p1 = self.first_phase_supply
-            phase_switch = 5  # TODO: Make this a variable
-            phase_switch_in_periods = phase_switch * 365
-            I_s_per_period = self.first_phase_stable_issuance  # per period
-            T_half = self.token_halving  # in years
-            T_half_in_periods = T_half * 365
+            I_max = self.first_phase_stable_issuance
 
-            if t <= phase_switch_in_periods:
-                S_t = S_0 + (t * I_s_per_period)
-            else:
-                S_t = S_0 + S_p1 + I_s_per_period * (1 - 2 ** (-t / T_half_in_periods)) / LOG2
+            S_t = S_0 + (t * I_max)
+
             return int(S_t)
 
-    def cumulative_rewards_at_period(self, period: int) -> int:
-        return self.token_supply_at_period(period) - self.erc20_initial_supply
+    def phase2_token_supply_at_period(self, period2: int) -> int:
+        if period2 < 0:
+            raise ValueError("Period must be a positive integer")
 
-    def rewards_during_period(self, period: int) -> int:
-        return self.cumulative_rewards_at_period(period) - self.cumulative_rewards_at_period(period-1)
+        with localcontext() as ctx:
+            ctx.prec = self._precision
 
+            t = Decimal(period2)
+            S_0 = self.erc20_initial_supply
+            I_max = self.first_phase_stable_issuance
+            S_p1 = self.
+            T_half = self.token_halving * 365
+
+            S_t = S_0 + S_p1 + I_max * (1 - 2 ** (-t / T_half)) / LOG2
+
+            return int(S_t)
+
+
+    def phase1_cumulative_rewards_at_period(self, period1: int) -> int:
+        return self.phase1_token_supply_at_period(period1) - self.erc20_initial_supply
+
+    def phase1_rewards_during_period(self, period1: int) -> int:
+        return self.phase1_cumulative_rewards_at_period(period1) - self.phase1_cumulative_rewards_at_period(period1-1)
+
+    def phase2_cumulative_rewards_at_period(self, period2: int) -> int:
+        return self.phase2_token_supply_at_period(period2) - self.first_phase_supply - self.erc20_initial_supply
+
+    def phase2_rewards_during_period(self, period2: int) -> int:
+        return self.phase2_cumulative_rewards_at_period(period2) - self.phase2_cumulative_rewards_at_period(period2-1)
 
 class EconomicsFactory:
     # TODO: Enforce singleton
