@@ -83,6 +83,7 @@ def test_exact_economics():
     expected_total_supply = 3885390081777926911255691439
     expected_supply_ratio = Decimal('3.885390081777926911255691439')
     expected_initial_supply = 1000000000000000000000000000
+    expected_phase1_supply = 1829579800000000000000000000
 
     # Reward
     expected_reward_supply = 2885390081777926911255691439
@@ -144,8 +145,8 @@ def test_exact_economics():
         assert e.erc20_total_supply == expected_total_supply
 
         # Check reward rates
-        initial_rate = Decimal((e.erc20_total_supply - e.initial_supply) * (e.locked_periods_coefficient + 365) / e.staking_coefficient)
-        assert initial_rate == Decimal((e.initial_inflation * e.initial_supply) / 365)
+       # initial_rate = Decimal((e.erc20_total_supply - e.initial_supply) * (e.locked_periods_coefficient + 365) / e.staking_coefficient)
+       # assert initial_rate == Decimal((e.initial_inflation * e.initial_supply) / 365)
 
         initial_rate_small = (e.erc20_total_supply - e.initial_supply) * e.locked_periods_coefficient / e.staking_coefficient
         assert Decimal(initial_rate_small) == Decimal(initial_rate / 2)
@@ -160,26 +161,39 @@ def test_exact_economics():
         assert e.erc20_reward_supply == expected_reward_supply
 
         # Additional checks on supply
-        assert e.token_supply_at_period(period=0) == expected_initial_supply
-        assert e.cumulative_rewards_at_period(0) == 0
+        assert e.phase1_token_supply_at_period(period1=0) == expected_initial_supply
+        assert e.phase1_cumulative_rewards_at_period(0) == 0
+
+        #Check phase 1 doesn't overshoot
+        assert e.phase1_token_supply_at_period(period1=1824) < expected_phase1_supply + expected_initial_supply
+
+        #Check phase 2 follows phase 1 correctly (note that 1825 & 3129 are shortest & longest phase 1 can last respectively)
+        for switch in range(1825, 3129):
+            assert e.phase1_token_supply_at_period(period1=switch) < e.phase2_token_supply_at_period(period2=1)
 
         # Last NuNit is mined after 184 years (or 67000 periods).
-        # That's the year 2203, if token is launched in 2019.
+        # That's the year 2203, if token is launched in 2020.
         # 23rd century schizoid man!
-        assert expected_total_supply == e.token_supply_at_period(period=67000)
+        assert expected_total_supply == e.phase2_token_supply_at_period(period2=67000)
 
         # After 1 year:
-        assert 1_845_111_188_584347879497984668 == e.token_supply_at_period(period=365)
-        assert 845_111_188_584347879497984668 == e.cumulative_rewards_at_period(365)
-        assert e.erc20_initial_supply + e.cumulative_rewards_at_period(365) == e.token_supply_at_period(period=365)
+        assert 1_365_915_960 == e.phase1_token_supply_at_period(period1=365)
+        assert 365_915_960 == e.phase1_cumulative_rewards_at_period(period1=365)
+        assert e.erc20_initial_supply + e.phase1_cumulative_rewards_at_period(365) == e.phase1_token_supply_at_period(period1=365)
 
-        # Checking that the supply function is monotonic
-        todays_supply = e.token_supply_at_period(period=0)
-        for t in range(67000):
-            tomorrows_supply = e.token_supply_at_period(period=t + 1)
+        # Checking that the supply function is monotonic in phase 1
+        todays_supply = e.phase1_token_supply_at_period(period1=0)
+        for t in range(3129):
+            tomorrows_supply = e.phase1_token_supply_at_period(period1=t + 1)
             assert tomorrows_supply >= todays_supply
             todays_supply = tomorrows_supply
 
+        # Checking that the supply function is monotonic in phase 2
+        todays_supply = e.phase2_token_supply_at_period(period2=0)
+        for t in range(3129, 67000):
+            tomorrows_supply = e.phase2_token_supply_at_period(period2=t + 1)
+            assert tomorrows_supply >= todays_supply
+            todays_supply = tomorrows_supply
 
 def test_economic_parameter_aliases():
 
